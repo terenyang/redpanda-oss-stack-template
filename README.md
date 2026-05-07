@@ -2,61 +2,78 @@
 
 Unofficial OSS Redpanda Docker Compose template with SASL authentication, Redpanda Console, Nginx Basic Auth, and bootstrap automation.
 
-## Overview
+## Design Philosophy
 
-This repository provides a lightweight enterprise-style event streaming starter stack using:
+This repository intentionally prioritizes:
 
-- Redpanda OSS
-- Redpanda Console OSS
-- SASL/SCRAM authentication
-- Topic and ACL bootstrap automation
-- Nginx reverse proxy
-- HTTP Basic Authentication
-- Docker Compose
+- One-command startup
+- Self-contained deployment
+- Minimal external dependencies
+- Enterprise-inspired architecture patterns
+- Fast PoC onboarding
 
-The stack is intentionally designed for:
+The primary `docker-compose.yml` is designed to run without requiring:
 
-- Local development
+- Local shell scripts
+- External configuration files
+- Manual bootstrap steps
+- Separate environment variable management
+
+This makes the stack ideal for:
+
+- Internal demos
 - Event-driven architecture PoCs
-- Internal platform engineering experiments
+- Platform engineering experiments
+- Local Kafka-compatible development
 - Lightweight enterprise messaging prototypes
 
 ## Architecture
 
+```text
 Client
   -> Nginx Basic Auth
     -> Redpanda Console
-      -> Redpanda Broker (SASL)
+      -> Redpanda Broker (SASL/SCRAM)
+```
 
-## Included Features
+## Included Components
 
-### Security
+### Redpanda OSS
 
-- SASL/SCRAM authentication enabled
-- Separate admin and application users
-- ACL bootstrap automation
-- Console protected behind Nginx Basic Auth
+- Kafka-compatible streaming platform
+- SASL/SCRAM enabled
+- Persistent storage
+- Health checks enabled
 
-### Platform Bootstrap
+### Redpanda Console OSS
 
-- Automatic SASL user creation
-- Automatic ACL provisioning
-- Automatic starter topic creation
-- Dynamic config generation
+- Web UI for topics, consumers, and messages
+- Authenticated using SASL/SCRAM
+- Internal-only exposure behind Nginx
 
-### Operational Features
+### Nginx Reverse Proxy
 
-- Persistent Docker volumes
-- Health checks
-- Ordered service startup
-- Internal-only management APIs
+- HTTP Basic Authentication
+- Reverse proxy for Console
+- WebSocket-compatible proxy configuration
+
+### Bootstrap Automation
+
+Automatically performs:
+
+- SASL user creation
+- ACL provisioning
+- Topic initialization
+- Console config generation
+- Nginx config generation
 
 ## Repository Structure
 
-```
+```text
 .
+├── docker-compose.yml                  # Primary one-command deployment
 ├── compose/
-│   └── docker-compose.yml
+│   └── docker-compose.modular.yml      # Advanced modular version
 ├── scripts/
 │   ├── bootstrap-redpanda.sh
 │   └── generate-config.sh
@@ -66,39 +83,36 @@ Client
 
 ## Quick Start
 
-### 1. Clone Repository
+### Start Stack
 
 ```bash
-git clone https://github.com/terenyang/redpanda-oss-stack-template.git
-cd redpanda-oss-stack-template
-```
-
-### 2. Create Environment File
-
-```bash
-cp .env.example .env
-```
-
-Update passwords before startup.
-
-### 3. Start Stack
-
-```bash
-cd compose
 docker compose up -d
 ```
 
-### 4. Open Console
-
-URL:
+### Open Console
 
 ```text
 http://localhost:9090
 ```
 
-Use the Basic Auth credentials defined in `.env`.
+Demo credential:
+
+```text
+Username: admin
+Password: change_me_console_password
+```
 
 ## Kafka Connection Example
+
+### SASL Credentials
+
+```text
+Username: kafka
+Password: change_me_kafka_password
+Mechanism: SCRAM-SHA-256
+```
+
+### Python Example
 
 ```python
 from kafka import KafkaProducer
@@ -108,23 +122,41 @@ producer = KafkaProducer(
     security_protocol='SASL_PLAINTEXT',
     sasl_mechanism='SCRAM-SHA-256',
     sasl_plain_username='kafka',
-    sasl_plain_password='your_password'
+    sasl_plain_password='change_me_kafka_password'
 )
 ```
 
-## Default Starter Topics
+## Automatically Created Topics
 
-The bootstrap script automatically creates:
+The bootstrap process automatically creates:
 
 - moveorder.events
 - moveorder.workflow
 - moveorder.deadletter
 
+## Modular Version
+
+An advanced modular version is also included:
+
+```text
+compose/docker-compose.modular.yml
+```
+
+The modular version is intended for:
+
+- Teams managing multiple environments
+- Environment-variable-based configuration
+- Easier password rotation
+- Script maintainability
+- Extended customization
+
 ## Security Notes
 
 This repository is intended for development and PoC usage.
 
-For production:
+The included credentials are intentionally public demo credentials and MUST be changed before any real deployment.
+
+For production usage:
 
 - Enable TLS
 - Rotate credentials
@@ -132,6 +164,16 @@ For production:
 - Use external secret management
 - Configure granular ACLs
 - Add monitoring and metrics collection
+- Avoid exposing broker ports publicly
+
+## Version Compatibility
+
+This repository intentionally pins:
+
+- Redpanda OSS: `v22.2.7`
+- Redpanda Console OSS: `v2.6.0`
+
+These versions were selected based on verified compatibility and stability testing.
 
 ## Disclaimer
 
