@@ -1,0 +1,100 @@
+volumes:
+  redpanda_data:
+  rp-config:
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v22.2.7
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:${REDPANDA_KAFKA_INTERNAL_PORT},external://0.0.0.0:${REDPANDA_KAFKA_EXTERNAL_PORT}
+      - --advertise-kafka-addr
+      - internal://redpanda:${REDPANDA_KAFKA_INTERNAL_PORT},external://localhost:${REDPANDA_KAFKA_EXTERNAL_PORT}
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --default-log-level=info
+      - --set
+      - redpanda.enable_sasl=true
+      - --set
+      - redpanda.superusers=['admin']
+    ports:
+      - "${REDPANDA_KAFKA_INTERNAL_PORT}:${REDPANDA_KAFKA_INTERNAL_PORT}"
+      - "${REDPANDA_KAFKA_EXTERNAL_PORT}:${REDPANDA_KAFKA_EXTERNAL_PORT}"
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  redpanda-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v22.2.7
+    container_name: redpanda-init
+    restart: "no"
+    env_file:
+      - ../.env
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    volumes:
+      - ../scripts/bootstrap-redpanda.sh:/bootstrap-redpanda.sh:ro
+    entrypoint: ["/bin/bash", "/bootstrap-redpanda.sh"]
+
+  rp-config-init:
+    image: alpine:latest
+    container_name: rp-config-init
+    restart: "no"
+    env_file:
+      - ../.env
+    entrypoint: ["/bin/sh", "/generate-config.sh"]
+    volumes:
+      - rp-config:/config
+      - ../scripts/generate-config.sh:/generate-config.sh:ro
+
+  console:
+    image: docker.redpanda.com/redpandadata/console:v2.6.0
+    container_name: redpanda-console
+    environment:
+      CONFIG_FILEPATH: /config/console-config.yaml
+    volumes:
+      - rp-config:/config:ro
+    expose:
+      - "8080"
+    depends_on:
+      rp-config-init:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:alpine
+    container_name: rp-nginx
+    ports:
+      - "${CONSOLE_PROXY_PORT}:8081"
+    volumes:
+      - rp-config:/config:ro
+    command: ["nginx", "-c", "/config/nginx.conf", "-g", "daemon off;"]
+    depends_on:
+      rp-config-init:
+        condition: service_completed_successfully
+      console:
+        condition: service_started
