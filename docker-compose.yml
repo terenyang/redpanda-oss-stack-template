@@ -82,11 +82,6 @@ services:
         echo "Granting consumer group read permission..."
         rpk acl create --allow-principal User:$${APP_USER} --operation read --group '*' --allow-host '*' --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Consumer group ACL may already exist"
 
-        echo "Creating starter topics..."
-        rpk topic create moveorder.events --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || true
-        rpk topic create moveorder.workflow --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || true
-        rpk topic create moveorder.deadletter --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || true
-
         echo "Verifying SASL authentication..."
         rpk cluster info --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Admin authentication test completed"
         rpk cluster info --brokers redpanda:9092 --user $${APP_USER} --password $${APP_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Application authentication test completed"
@@ -149,9 +144,10 @@ services:
         NGINX_EOF
 
         echo "Generating htpasswd..."
-        # Demo credential: admin / change_me_console_password
+        # Replace this placeholder with a real htpasswd entry before using the Console.
+        # See README.md for generation commands.
         cat > /config/htpasswd <<'HTPASSWD_EOF'
-        admin:$apr1$redacted$DqUeT6O8rKz5SbE5tQ9La/
+        admin:REPLACE_WITH_HTPASSWD_HASH
         HTPASSWD_EOF
 
         echo "Generated config files:"
