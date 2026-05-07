@@ -1,0 +1,10 @@
+# Advanced modular compose variant.
+#
+# This version externalizes scripts and environment configuration
+# for teams that prefer maintainability and customization.
+#
+# Quick-start users should use the root docker-compose.yml instead.
+#
+# Usage:
+#   cp .env.example .env
+#   docker compose -f compose/docker-compose.modular.yml up -d
