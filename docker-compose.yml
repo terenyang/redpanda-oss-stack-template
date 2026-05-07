@@ -1,0 +1,191 @@
+volumes:
+  redpanda_data:
+  rp-config:
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v22.2.7
+    container_name: redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --smp
+      - "1"
+      - --memory
+      - 1G
+      - --default-log-level=info
+      - --set
+      - redpanda.enable_sasl=true
+      - --set
+      - redpanda.superusers=['admin']
+    ports:
+      - "9092:9092"
+      - "19092:19092"
+      # Keep management APIs internal by default.
+      # - "9644:9644"  # Admin API
+      # - "8081:8081"  # Schema Registry
+      # - "8082:8082"  # PandaProxy
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+
+  redpanda-init:
+    image: docker.redpanda.com/redpandadata/redpanda:v22.2.7
+    container_name: redpanda-init
+    restart: "no"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -e
+        ADMIN_USER="admin"
+        ADMIN_PASSWORD="change_me_admin_password"
+        APP_USER="kafka"
+        APP_PASSWORD="change_me_kafka_password"
+
+        echo "Creating SASL admin user..."
+        rpk acl user create "$${ADMIN_USER}" --password "$${ADMIN_PASSWORD}" --api-urls redpanda:9644 || echo "Admin user may already exist"
+
+        echo "Creating SASL application user..."
+        rpk acl user create "$${APP_USER}" --password "$${APP_PASSWORD}" --api-urls redpanda:9644 || echo "Application user may already exist"
+
+        echo "Granting topic write permission..."
+        rpk acl create --allow-principal User:$${APP_USER} --operation write --topic '*' --allow-host '*' --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Write ACL may already exist"
+
+        echo "Granting topic read permission..."
+        rpk acl create --allow-principal User:$${APP_USER} --operation read --topic '*' --allow-host '*' --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Read ACL may already exist"
+
+        echo "Granting topic describe permission..."
+        rpk acl create --allow-principal User:$${APP_USER} --operation describe --topic '*' --allow-host '*' --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Describe ACL may already exist"
+
+        echo "Granting consumer group read permission..."
+        rpk acl create --allow-principal User:$${APP_USER} --operation read --group '*' --allow-host '*' --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Consumer group ACL may already exist"
+
+        echo "Creating starter topics..."
+        rpk topic create moveorder.events --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || true
+        rpk topic create moveorder.workflow --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || true
+        rpk topic create moveorder.deadletter --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || true
+
+        echo "Verifying SASL authentication..."
+        rpk cluster info --brokers redpanda:9092 --user $${ADMIN_USER} --password $${ADMIN_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Admin authentication test completed"
+        rpk cluster info --brokers redpanda:9092 --user $${APP_USER} --password $${APP_PASSWORD} --sasl-mechanism SCRAM-SHA-256 || echo "Application authentication test completed"
+
+        echo "Redpanda bootstrap completed."
+
+  rp-config-init:
+    image: alpine:latest
+    container_name: rp-config-init
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+
+        echo "Generating console-config.yaml..."
+        cat > /config/console-config.yaml <<'CONSOLE_EOF'
+        kafka:
+          brokers:
+            - redpanda:9092
+          sasl:
+            enabled: true
+            mechanism: SCRAM-SHA-256
+            username: admin
+            password: change_me_admin_password
+
+        redpanda:
+          adminApi:
+            enabled: true
+            urls:
+              - http://redpanda:9644
+        CONSOLE_EOF
+
+        echo "Generating nginx.conf..."
+        cat > /config/nginx.conf <<'NGINX_EOF'
+        events {
+            worker_connections 1024;
+        }
+
+        http {
+            server {
+                listen 8081;
+                server_name _;
+
+                auth_basic "Redpanda Console";
+                auth_basic_user_file /config/htpasswd;
+
+                location / {
+                    proxy_pass http://console:8080;
+                    proxy_http_version 1.1;
+                    proxy_set_header Upgrade $$http_upgrade;
+                    proxy_set_header Connection "upgrade";
+                    proxy_set_header Host $$host;
+                    proxy_set_header X-Real-IP $$remote_addr;
+                    proxy_set_header X-Forwarded-For $$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto $$scheme;
+                }
+            }
+        }
+        NGINX_EOF
+
+        echo "Generating htpasswd..."
+        # Demo credential: admin / change_me_console_password
+        cat > /config/htpasswd <<'HTPASSWD_EOF'
+        admin:$apr1$redacted$DqUeT6O8rKz5SbE5tQ9La/
+        HTPASSWD_EOF
+
+        echo "Generated config files:"
+        ls -la /config/
+    volumes:
+      - rp-config:/config
+
+  console:
+    image: docker.redpanda.com/redpandadata/console:v2.6.0
+    container_name: redpanda-console
+    environment:
+      CONFIG_FILEPATH: /config/console-config.yaml
+    volumes:
+      - rp-config:/config:ro
+    expose:
+      - "8080"
+    depends_on:
+      rp-config-init:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_healthy
+      redpanda-init:
+        condition: service_completed_successfully
+
+  nginx:
+    image: nginx:alpine
+    container_name: rp-nginx
+    ports:
+      - "9090:8081"
+    volumes:
+      - rp-config:/config:ro
+    command: ["nginx", "-c", "/config/nginx.conf", "-g", "daemon off;"]
+    depends_on:
+      rp-config-init:
+        condition: service_completed_successfully
+      console:
+        condition: service_started
