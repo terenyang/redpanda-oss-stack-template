@@ -63,7 +63,6 @@ Automatically performs:
 
 - SASL user creation
 - ACL provisioning
-- Topic initialization
 - Console config generation
 - Nginx config generation
 
@@ -95,11 +94,38 @@ docker compose up -d
 http://localhost:9090
 ```
 
-Demo credential:
+## Configure Nginx Basic Auth
+
+The root compose intentionally contains a placeholder htpasswd entry:
 
 ```text
-Username: admin
-Password: change_me_console_password
+admin:REPLACE_WITH_HTPASSWD_HASH
+```
+
+Before using the Console UI, generate a valid htpasswd hash.
+
+### Option 1 - Using Docker (Recommended)
+
+```bash
+docker run --rm httpd:2.4-alpine htpasswd -nbB admin your_password
+```
+
+Example output:
+
+```text
+admin:$2y$05$...
+```
+
+Replace this line inside `docker-compose.yml`:
+
+```text
+admin:REPLACE_WITH_HTPASSWD_HASH
+```
+
+### Option 2 - Using Local htpasswd Tool
+
+```bash
+htpasswd -nbB admin your_password
 ```
 
 ## Kafka Connection Example
@@ -125,14 +151,6 @@ producer = KafkaProducer(
     sasl_plain_password='change_me_kafka_password'
 )
 ```
-
-## Automatically Created Topics
-
-The bootstrap process automatically creates:
-
-- moveorder.events
-- moveorder.workflow
-- moveorder.deadletter
 
 ## Modular Version
 
